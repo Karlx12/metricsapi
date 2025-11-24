@@ -1058,12 +1058,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/incadev-uns/core-domain.git",
-                "reference": "376910112c305cfb368081c7c04297d99e6d1019"
+                "reference": "c33ddec5054c2f799c8192d869539397533a335e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/incadev-uns/core-domain/zipball/376910112c305cfb368081c7c04297d99e6d1019",
-                "reference": "376910112c305cfb368081c7c04297d99e6d1019",
+                "url": "https://api.github.com/repos/incadev-uns/core-domain/zipball/c33ddec5054c2f799c8192d869539397533a335e",
+                "reference": "c33ddec5054c2f799c8192d869539397533a335e",
                 "shasum": ""
             },
             "require": {
@@ -1133,7 +1133,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2025-11-18T00:49:29+00:00"
+            "time": "2025-11-24T01:23:48+00:00"
         },
         {
             "name": "incadev/core",

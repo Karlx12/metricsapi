@@ -9,9 +9,9 @@ use Illuminate\Support\Facades\Http;
  */
 class MetaApiService
 {
-    protected string $baseUrl = 'https://graph.facebook.com/v24.0';
+    public string $baseUrl = 'https://graph.facebook.com/v24.0';
 
-    protected string $accessToken;
+    public string $accessToken;
 
     public function __construct()
     {
@@ -23,21 +23,47 @@ class MetaApiService
      */
     public function getFacebookPostMetrics(string $postId): array
     {
-        $url = "{$this->baseUrl}/{$postId}/insights";
-        $params = [
-            'metric' => 'post_impressions,post_engaged_users,post_reactions_by_type_total,post_comments,post_shares',
+        // Obtener views de insights
+        $insightsUrl = "{$this->baseUrl}/{$postId}/insights";
+        $insightsParams = [
+            'metric' => 'post_impressions',
             'access_token' => $this->accessToken,
         ];
 
-        $response = Http::get($url, $params);
+        $insightsResponse = Http::get($insightsUrl, $insightsParams);
 
-        if ($response->failed()) {
-            throw new \Exception('Error fetching Facebook metrics: ' . $response->body());
+        $views = 0;
+        if ($insightsResponse->successful()) {
+            $insightsData = $insightsResponse->json()['data'] ?? [];
+            foreach ($insightsData as $metric) {
+                if ($metric['name'] === 'post_impressions') {
+                    $views = $metric['values'][0]['value'] ?? 0;
+                    break;
+                }
+            }
         }
 
-        $data = $response->json()['data'] ?? [];
+        // Obtener likes, comments, shares del post
+        $postUrl = "{$this->baseUrl}/{$postId}";
+        $postParams = [
+            'fields' => 'shares,comments.summary(true).limit(0),reactions.type(LIKE).summary(true).limit(0)',
+            'access_token' => $this->accessToken,
+        ];
 
-        return $this->parseFacebookMetrics($data);
+        $postResponse = Http::get($postUrl, $postParams);
+
+        if ($postResponse->failed()) {
+            throw new \Exception('Error fetching Facebook post data: ' . $postResponse->body());
+        }
+
+        $postData = $postResponse->json();
+
+        return [
+            'views' => $views,
+            'likes' => $postData['reactions']['summary']['total_count'] ?? 0,
+            'comments' => $postData['comments']['summary']['total_count'] ?? 0,
+            'shares' => $postData['shares']['count'] ?? 0,
+        ];
     }
 
     /**
@@ -45,91 +71,54 @@ class MetaApiService
      */
     public function getInstagramPostMetrics(string $postId): array
     {
-        $url = "{$this->baseUrl}/{$postId}/insights";
-        $params = [
-            'metric' => 'impressions,reach,likes,comments,shares',
+        // Obtener likes, comments, video_views
+        $postUrl = "{$this->baseUrl}/{$postId}";
+        $postParams = [
+            'fields' => 'like_count,comments_count,video_view_count',
             'access_token' => $this->accessToken,
         ];
 
-        $response = Http::get($url, $params);
+        $postResponse = Http::get($postUrl, $postParams);
 
-        if ($response->failed()) {
-            throw new \Exception('Error fetching Instagram metrics: ' . $response->body());
+        $likes = 0;
+        $comments = 0;
+        $videoViews = 0;
+
+        if ($postResponse->successful()) {
+            $postData = $postResponse->json();
+            $likes = $postData['like_count'] ?? 0;
+            $comments = $postData['comments_count'] ?? 0;
+            $videoViews = $postData['video_view_count'] ?? 0;
         }
 
-        $data = $response->json()['data'] ?? [];
-
-        return $this->parseInstagramMetrics($data);
-    }
-
-    /**
-     * Parsea métricas de Facebook.
-     */
-    protected function parseFacebookMetrics(array $data): array
-    {
-        $metrics = [
-            'views' => 0,
-            'likes' => 0,
-            'comments' => 0,
-            'shares' => 0,
+        // Obtener views (impressions), saved
+        $insightsUrl = "{$this->baseUrl}/{$postId}/insights";
+        $insightsParams = [
+            'metric' => 'impressions,saved',
+            'access_token' => $this->accessToken,
         ];
 
-        foreach ($data as $metric) {
-            switch ($metric['name']) {
-                case 'post_impressions':
-                    $metrics['views'] = $metric['values'][0]['value'] ?? 0;
-                    break;
-                case 'post_engaged_users':
-                    // Approximate likes from engaged users, but actually need reactions
-                    break;
-                case 'post_reactions_by_type_total':
-                    $reactions = $metric['values'][0]['value'] ?? [];
-                    $metrics['likes'] = ($reactions['like'] ?? 0) + ($reactions['love'] ?? 0) + ($reactions['wow'] ?? 0) + ($reactions['haha'] ?? 0) + ($reactions['sad'] ?? 0) + ($reactions['angry'] ?? 0);
-                    break;
-                case 'post_comments':
-                    $metrics['comments'] = $metric['values'][0]['value'] ?? 0;
-                    break;
-                case 'post_shares':
-                    $metrics['shares'] = $metric['values'][0]['value'] ?? 0;
-                    break;
+        $insightsResponse = Http::get($insightsUrl, $insightsParams);
+
+        $views = $videoViews; // Default to video_views if available
+        $saved = 0;
+
+        if ($insightsResponse->successful()) {
+            $insightsData = $insightsResponse->json()['data'] ?? [];
+            foreach ($insightsData as $metric) {
+                if ($metric['name'] === 'impressions') {
+                    $views = $metric['values'][0]['value'] ?? $videoViews;
+                } elseif ($metric['name'] === 'saved') {
+                    $saved = $metric['values'][0]['value'] ?? 0;
+                }
             }
         }
 
-        return $metrics;
-    }
-
-    /**
-     * Parsea métricas de Instagram.
-     */
-    protected function parseInstagramMetrics(array $data): array
-    {
-        $metrics = [
-            'views' => 0,
-            'likes' => 0,
-            'comments' => 0,
-            'shares' => 0,
+        return [
+            'views' => $views,
+            'likes' => $likes,
+            'comments' => $comments,
+            'shares' => $saved,
         ];
-
-        foreach ($data as $metric) {
-            switch ($metric['name']) {
-                case 'impressions':
-                    $metrics['views'] = $metric['values'][0]['value'] ?? 0;
-                    break;
-                case 'reach':
-                    // Reach is different from views, but for simplicity
-                    break;
-                case 'likes':
-                    $metrics['likes'] = $metric['values'][0]['value'] ?? 0;
-                    break;
-                case 'comments':
-                    $metrics['comments'] = $metric['values'][0]['value'] ?? 0;
-                    break;
-                case 'shares':
-                    $metrics['shares'] = $metric['values'][0]['value'] ?? 0;
-                    break;
-            }
-        }
-
-        return $metrics;
     }
 }
