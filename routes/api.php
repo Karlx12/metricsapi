@@ -18,10 +18,9 @@ use App\Http\Controllers\MetricsController;
 
 
 Route::prefix('v1/marketing/metrics')->group(function () {
+    // (CORS handled globally in public/index.php)
+    // Read-only getters remain for inspection
     Route::get('post/{postId}', [MetricsController::class, 'getMetrics']);
-    Route::post('post/{postId}/update', [MetricsController::class, 'updateMetrics']);
     Route::get('campaign/{campaignId}', [MetricsController::class, 'getCampaignMetrics']);
-    Route::post('campaign/{campaignId}/refresh', [MetricsController::class, 'refreshCampaignMetrics']);
-    Route::get('facebook/posts', [MetricsController::class, 'getFacebookPosts']);
-    Route::get('instagram/posts', [MetricsController::class, 'getInstagramPosts']);
+    Route::post('fetch', [MetricsController::class, 'fetchAndUpdateAll']);
 });

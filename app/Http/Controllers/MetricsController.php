@@ -62,56 +62,12 @@ class MetricsController extends Controller
     /**
      * Refresca métricas para todos los posts de una campaña.
      */
-    public function refreshCampaignMetrics(int $campaignId): JsonResponse
-    {
-        $posts = Post::where('campaign_id', $campaignId)->get();
-
-        if ($posts->isEmpty()) {
-            return response()->json(['error' => 'No posts found for this campaign'], 404);
-        }
-
-        $updatedMetrics = [];
-        foreach ($posts as $post) {
-            try {
-                $metric = $this->updatePostMetrics($post, $post->platform);
-                $updatedMetrics[] = $metric;
-            } catch (\Exception $e) {
-                // Log error, but continue
-            }
-        }
-
-        return response()->json([
-            'message' => 'Metrics refreshed successfully',
-            'campaign_id' => $campaignId,
-            'posts_processed' => $posts->count(),
-            'metrics_updated' => count($updatedMetrics),
-            'metrics' => $updatedMetrics,
-        ]);
-    }
+    // NOTE: campaign-level refresh removed in favor of a global fetch endpoint.
 
     /**
      * Actualiza métricas para una publicación desde la API de Meta.
      */
-    public function updateMetrics(Request $request, int $postId): JsonResponse
-    {
-        $request->validate([
-            'platform' => 'required|string|in:facebook,instagram',
-        ]);
-
-        $post = Post::find($postId);
-
-        if (! $post) {
-            return response()->json(['error' => 'Post not found'], 404);
-        }
-
-        try {
-            $metric = $this->updatePostMetrics($post, $request->platform);
-
-            return response()->json($metric);
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
-        }
-    }
+    // Per-post update endpoint removed; UI now triggers global fetch that reads DB.
 
     /**
      * Método privado para actualizar métricas de un post.
@@ -140,114 +96,64 @@ class MetricsController extends Controller
     /**
      * Obtener posts de Facebook desde Meta API y guardarlos en la base de datos.
      */
-    public function getFacebookPosts(Request $request): JsonResponse
-    {
-        $request->validate([
-            'campaign_id' => 'nullable|integer|exists:campaigns,id',
-            'limit' => 'nullable|integer|min:1|max:100',
-        ]);
-
-        $limit = $request->limit ?? 10;
-
-        $pageId = env('META_PAGE_ID');
-        $url = "{$this->metaApi->baseUrl}/{$pageId}/posts";
-        $params = [
-            'fields' => 'id,created_time,message,shares.summary(true).limit(0),comments.summary(true).limit(0),reactions.type(LIKE).summary(true).limit(0)',
-            'access_token' => $this->metaApi->accessToken,
-            'limit' => $limit,
-        ];
-
-        $response = Http::get($url, $params);
-
-        if ($response->failed()) {
-            return response()->json(['error' => 'Error fetching Facebook posts: '.$response->body()], 500);
-        }
-
-        $data = $response->json();
-
-        // Guardar posts en la base de datos
-        $savedPosts = [];
-        if (isset($data['data'])) {
-            foreach ($data['data'] as $postData) {
-                $post = Post::updateOrCreate(
-                    ['meta_post_id' => $postData['id']],
-                    [
-                        'campaign_id' => $request->campaign_id,
-                        'title' => substr($postData['message'] ?? 'Facebook Post', 0, 255),
-                        'platform' => 'facebook',
-                        'content' => $postData['message'] ?? null,
-                        'content_type' => 'text',
-                        'status' => 'published',
-                        'published_at' => $postData['created_time'],
-                        'created_by' => auth()->id(),
-                    ]
-                );
-                $savedPosts[] = $post;
-                $this->updatePostMetrics($post, 'facebook');
-            }
-        }
-
-        return response()->json([
-            'message' => 'Posts and metrics saved successfully',
-            'saved_count' => count($savedPosts),
-            'data' => $data,
-        ]);
-    }
+    // Facebook import endpoints removed — the metrics service no longer imports posts.
 
     /**
      * Obtener media de Instagram desde Meta API y guardarlos en la base de datos.
      */
-    public function getInstagramPosts(Request $request): JsonResponse
+    // Instagram import endpoint removed — no longer used.
+
+    /**
+     * Actualiza métricas en lote para una lista de posts.
+     * Espera un payload: { items: [ { post_id: 123, platform: 'facebook' }, ... ] }
+     */
+    // Batch update removed; UI will call fetchAndUpdateAll() which reads DB (no params).
+
+    /**
+     * Fetch and update metrics for up to 20 posts that have a meta_post_id.
+     * The endpoint accepts no parameters — it selects posts from the database.
+     */
+    public function fetchAndUpdateAll(): JsonResponse
     {
-        $request->validate([
-            'campaign_id' => 'nullable|integer|exists:campaigns,id',
-            'limit' => 'nullable|integer|min:1|max:100',
-        ]);
+        $posts = Post::whereNotNull('meta_post_id')
+            ->where('meta_post_id', '!=', '')
+            ->limit(20)
+            ->get();
 
-        $limit = $request->limit ?? 10;
-
-        $igUserId = env('META_IG_USER_ID');
-        $url = "{$this->metaApi->baseUrl}/{$igUserId}/media";
-        $params = [
-            'fields' => 'id,timestamp,media_type,like_count,comments_count,video_view_count',
-            'access_token' => $this->metaApi->accessToken,
-            'limit' => $limit,
-        ];
-
-        $response = Http::get($url, $params);
-
-        if ($response->failed()) {
-            return response()->json(['error' => 'Error fetching Instagram media: '.$response->body()], 500);
+        if ($posts->isEmpty()) {
+            return response()->json(['message' => 'No posts with meta_post_id found'], 200);
         }
 
-        $data = $response->json();
+        $results = [];
+        $processed = 0;
+        $updated = 0;
 
-        // Guardar posts en la base de datos
-        $savedPosts = [];
-        if (isset($data['data'])) {
-            foreach ($data['data'] as $postData) {
-                $post = Post::updateOrCreate(
-                    ['meta_post_id' => $postData['id']],
-                    [
-                        'campaign_id' => $request->campaign_id,
-                        'title' => 'Instagram Post',
-                        'platform' => 'instagram',
-                        'content' => null,
-                        'content_type' => strtolower($postData['media_type']),
-                        'status' => 'published',
-                        'published_at' => $postData['timestamp'],
-                        'created_by' => auth()->id(),
-                    ]
-                );
-                $savedPosts[] = $post;
-                $this->updatePostMetrics($post, 'instagram');
+        foreach ($posts as $post) {
+            $processed++;
+            try {
+                $metric = $this->updatePostMetrics($post, $post->platform);
+                $results[] = [
+                    'post_id' => $post->id,
+                    'meta_post_id' => $post->meta_post_id,
+                    'status' => 'updated',
+                    'metric_id' => $metric->id ?? null,
+                ];
+                $updated++;
+            } catch (\Exception $e) {
+                $results[] = [
+                    'post_id' => $post->id,
+                    'meta_post_id' => $post->meta_post_id,
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ];
             }
         }
 
         return response()->json([
-            'message' => 'Posts and metrics saved successfully',
-            'saved_count' => count($savedPosts),
-            'data' => $data,
+            'message' => 'Fetch completed',
+            'posts_processed' => $processed,
+            'posts_updated' => $updated,
+            'results' => $results,
         ]);
     }
 }
