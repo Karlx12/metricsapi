@@ -35,7 +35,8 @@ class MetricsController extends Controller
         $metrics = $post->metrics()->latest()->first();
 
         if (! $metrics) {
-            return response()->json(['error' => 'No metrics found for this post'], 404);
+            // No metrics for this post: return 200 with explicit null to indicate empty result
+            return response()->json(['success' => true, 'post_id' => $postId, 'metrics' => null], 200);
         }
 
         return response()->json($metrics);
@@ -53,7 +54,8 @@ class MetricsController extends Controller
             ->get();
 
         if ($metrics->isEmpty()) {
-            return response()->json(['error' => 'No metrics found for this campaign'], 404);
+            // No metrics for this campaign: return 200 with an empty array so clients treat this as "no data" rather than an error
+            return response()->json(['success' => true, 'campaign_id' => $campaignId, 'metrics' => []], 200);
         }
 
         return response()->json($metrics);
