@@ -6,7 +6,7 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => [env('FRONTEND_URL', 'http://136.110.152.168')],
+    'allowed_origins' => [env('FRONTEND_URL', 'https://136.110.152.168')],
 
     'allowed_origins_patterns' => [],
 
